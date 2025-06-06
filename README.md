@@ -16,5 +16,5 @@ AI 學習助理：自動生成練習題解說與答案
 ### 1. Fork 或 clone 此 repo
 
 ```bash
-git clone https://github.com/yourusername/mindmix-ai.git
+git clone https://github.com/D445968/MindMix-AI
 
