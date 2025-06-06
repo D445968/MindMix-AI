@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 import os
 import requests
 from datetime import datetime
-from subject_prompts import subject_prompts  # 你自己的題目模板
+from subject_prompts import subject_prompts
+from urllib.parse import urlencode
 
 # 載入環境變數
 load_dotenv()
@@ -17,7 +18,83 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 admin_supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-# OpenRouter API 請求
+# ---------- 登入／註冊區塊 ----------
+def google_login_button():
+    redirect_url = "https://mindmix-ai-o2wkozhzbtk38t5dghvfs7.streamlit.app/"  
+    params = {
+        "provider": "google",
+        "redirect_to": redirect_url,
+    }
+    google_url = f"{SUPABASE_URL}/auth/v1/authorize?{urlencode(params)}"
+    st.markdown(f"""
+    <a href="{google_url}">
+        <button style="padding: 0.5em 1em; background-color: #4285F4; color: white; border: none; border-radius: 5px;">
+            使用 Google 登入
+        </button>
+    </a>
+    """, unsafe_allow_html=True)
+
+def login():
+    st.title("登入")
+    email = st.text_input("Email", key="login_email")
+    password = st.text_input("密碼", type="password", key="login_password")
+    if st.button("登入"):
+        try:
+            user = supabase.auth.sign_in_with_password({"email": email, "password": password})
+            if user.user:
+                st.session_state.user = user.user
+                st.success("登入成功！")
+                st.experimental_rerun()
+            else:
+                st.error("登入失敗，請確認帳號密碼。")
+        except Exception as e:
+            st.error(f"登入錯誤：{e}")
+
+def signup():
+    st.title("註冊")
+    email = st.text_input("Email", key="signup_email")
+    password = st.text_input("密碼", type="password", key="signup_password")
+    password_confirm = st.text_input("確認密碼", type="password", key="signup_password_confirm")
+    if st.button("註冊"):
+        if password != password_confirm:
+            st.error("密碼與確認密碼不符。")
+            return
+        try:
+            user = supabase.auth.sign_up({"email": email, "password": password})
+            if user.user:
+                st.success("註冊成功，請查收驗證信。")
+            else:
+                st.error("註冊失敗，請稍後再試。")
+        except Exception as e:
+            st.error(f"註冊錯誤：{e}")
+
+# ---------- 自動登入處理 ----------
+def inject_token_rewriter():
+    st.markdown("""
+    <script>
+    const hash = window.location.hash;
+    if (hash && hash.includes("access_token")) {
+        const query = hash.replace("#", "?");
+        const cleanUrl = window.location.origin + window.location.pathname + query;
+        window.location.replace(cleanUrl);
+    }
+    </script>
+    """, unsafe_allow_html=True)
+
+def parse_url_tokens():
+    query_params = st.query_params
+    access_token = query_params.get("access_token")
+    refresh_token = query_params.get("refresh_token")
+    if access_token and refresh_token:
+        try:
+            user = supabase.auth.set_session(access_token, refresh_token)
+            if user.user:
+                st.session_state.user = user.user
+                st.experimental_rerun()
+        except Exception as e:
+            st.error(f"⚠️ 自動登入失敗：{e}")
+
+# ---------- 主要功能 ----------
 def ask_openrouter(prompt, language="繁體中文"):
     system_prompt = {
         "繁體中文": "你是一個親切、有幫助的中文學習助理，請用繁體中文回答使用者。",
@@ -43,20 +120,17 @@ def ask_openrouter(prompt, language="繁體中文"):
     else:
         return f"❌ 錯誤：{response.status_code}"
 
-# 取得今日提問次數
 def get_today_question_count(user_id):
     today = datetime.utcnow().date().isoformat()
     result = admin_supabase.table("history").select("id", count="exact").eq("user_id", user_id).gte("created_at", today).execute()
     return result.count or 0
 
-# 儲存紀錄或收藏
 def save_record(table, data):
     try:
         admin_supabase.table(table).insert(data).execute()
     except Exception as e:
         st.error(f"❌ 儲存失敗：{e}")
 
-# 載入使用者資料
 def load_records(table, user_id):
     try:
         return supabase.table(table).select("*").eq("user_id", user_id).execute().data
@@ -64,59 +138,6 @@ def load_records(table, user_id):
         st.error(f"❌ 載入失敗：{e}")
         return []
 
-# 登入功能（Email + Password）
-def login():
-    st.title("登入")
-    email = st.text_input("Email", key="login_email")
-    password = st.text_input("密碼", type="password", key="login_password")
-    if st.button("登入"):
-        try:
-            user = supabase.auth.sign_in_with_password({"email": email, "password": password})
-            if user.user:
-                st.session_state.user = user.user
-                st.success("登入成功！")
-                st.experimental_rerun()
-            else:
-                st.error("登入失敗，請確認帳號密碼。")
-        except Exception as e:
-            st.error(f"登入錯誤：{e}")
-
-# 註冊功能
-def signup():
-    st.title("註冊")
-    email = st.text_input("Email", key="signup_email")
-    password = st.text_input("密碼", type="password", key="signup_password")
-    password_confirm = st.text_input("確認密碼", type="password", key="signup_password_confirm")
-    if st.button("註冊"):
-        if password != password_confirm:
-            st.error("密碼與確認密碼不符。")
-            return
-        try:
-            user = supabase.auth.sign_up({"email": email, "password": password})
-            if user.user:
-                st.success("註冊成功，請查收驗證信。")
-            else:
-                st.error("註冊失敗，請稍後再試。")
-        except Exception as e:
-            st.error(f"註冊錯誤：{e}")
-
-# Magic Link 登入功能（透過郵件發送登入連結）
-def magic_link_login():
-    st.title("Magic Link 登入")
-    email = st.text_input("輸入你的 Email，系統會發送登入連結")
-    if st.button("發送登入連結"):
-        try:
-            response = supabase.auth.sign_in_with_oauth({"email": email})
-            # supabase-python 目前沒有直接支援 magic link 發送的專用方法，我們改用 REST API 或使用 signInWithOtp
-            res = supabase.auth.api.sign_in_with_otp(email=email)
-            if res.user:
-                st.success("登入連結已發送到你的 Email，請查收。")
-            else:
-                st.error("發送失敗，請確認 Email 是否正確。")
-        except Exception as e:
-            st.error(f"發送失敗：{e}")
-
-# 主功能頁面
 def main_app(user_id):
     st.title("📚 MindMix AI")
     tabs = st.tabs(["💡 主頁", "📜 提問歷史", "⭐ 收藏題目"])
@@ -162,7 +183,7 @@ def main_app(user_id):
                 st.markdown(f"**答案：** {item['answer']}")
 
     with tabs[2]:
-        st.header("⭐ 我的收藏題目")
+        st.header("⭐ 我的收藏")
         for i, item in enumerate(reversed(load_records("favorites", user_id))):
             with st.expander(f"{item['subject']} - {item['task']} - 收藏第{i+1}題"):
                 st.markdown(f"**問題：** {item['question']}")
@@ -171,19 +192,24 @@ def main_app(user_id):
                     admin_supabase.table("favorites").delete().eq("id", item['id']).execute()
                     st.experimental_rerun()
 
-# 主入口
+# ---------- 主入口 ----------
 def main():
+    inject_token_rewriter()
+    parse_url_tokens()
+
     if "user" not in st.session_state:
-        menu = st.sidebar.selectbox("選擇", ["登入", "註冊", "Magic Link 登入"])
-        if menu == "登入":
+        st.title("🔐 請先登入")
+        method = st.radio("選擇登入方式：", ["Email 登入", "Email 註冊", "Google 登入"])
+
+        if method == "Email 登入":
             login()
-        elif menu == "註冊":
+        elif method == "Email 註冊":
             signup()
-        else:
-            magic_link_login()
+        elif method == "Google 登入":
+            google_login_button()
     else:
         user = st.session_state.user
-        st.sidebar.write(f"歡迎，{user.email}")
+        st.sidebar.write(f"👋 歡迎 {user.email}")
         if st.sidebar.button("登出"):
             supabase.auth.sign_out()
             del st.session_state["user"]
