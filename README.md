@@ -11,10 +11,14 @@ AI 學習助理：自動生成練習題解說與答案
 - ⭐ 收藏題目、📜 歷史紀錄
 - 📧 Email 登入 + 註冊
 
+Website: https://mindmix-ai.fly.dev/
+
 ## 🚀 如何部署
 
 ### 1. Fork 或 clone 此 repo
 
 ```bash
 git clone https://github.com/D445968/MindMix-AI
+
+
 
